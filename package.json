@@ -1,0 +1,22 @@
+{
+  "name": "free-call",
+  "version": "1.0.0",
+  "description": "FreeCall — free peer-to-peer voice & video calling over Wi-Fi or mobile data (WebRTC). No SIM, no carrier minutes, no cost.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/signaling.test.js",
+    "cf:dev": "wrangler dev",
+    "cf:deploy": "wrangler deploy"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "wrangler": "^4.123.0"
+  }
+}
