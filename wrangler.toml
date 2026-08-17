@@ -1,0 +1,32 @@
+# FreeCall on Cloudflare — Workers + Durable Objects
+#
+# This file lives at the repo root so `wrangler` finds it no matter where the
+# deploy runs from (Cloudflare Pages/Workers Builds CI, GitHub Actions, or
+# your own terminal).
+#
+# Deploy:  npm run cf:deploy        (equivalent: npx wrangler deploy)
+# Dev:     npm run cf:dev           (equivalent: npx wrangler dev)
+
+name = "freecall"
+main = "cloudflare/src/index.js"
+compatibility_date = "2026-08-01"
+
+# The web app (index.html, app.js, style.css) is served by the Worker as
+# static assets. Requests that match an asset are served directly; everything
+# else (/api, /room, /health) hits the Worker.
+[assets]
+directory = "public"
+binding = "ASSETS"
+
+# One Durable Object per call room. It owns the room's WebSocket connections
+# (using hibernation, so idle rooms cost ~nothing) and its tiny bit of state.
+[[durable_objects.bindings]]
+name = "CALL_ROOM"
+class_name = "CallRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["CallRoom"]
+
+[observability]
+enabled = true

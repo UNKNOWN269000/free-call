@@ -5,7 +5,9 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node test/signaling.test.js"
+    "test": "node test/signaling.test.js",
+    "cf:dev": "wrangler dev",
+    "cf:deploy": "wrangler deploy"
   },
   "engines": {
     "node": ">=18"
@@ -13,5 +15,8 @@
   "dependencies": {
     "express": "^4.21.2",
     "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "wrangler": "^4.123.0"
   }
 }

@@ -61,17 +61,17 @@ Then open <http://localhost:3000> in two browsers (or two tabs):
 ## Project layout
 
 ```
-server.js            signaling server (Node.js — rooms + relay)
+server.js              signaling server (Node.js — rooms + relay)
+wrangler.toml          Cloudflare deployment config (repo root)
 public/
-  index.html         UI: home, room, call screens + emergency/satellite facts
-  style.css          dark, phone-first styling
-  app.js             WebRTC call flow, ringtones, UI state machine
+  index.html           UI: home, room, call screens + emergency/satellite facts
+  style.css            dark, phone-first styling
+  app.js               WebRTC call flow, ringtones, UI state machine
 cloudflare/
-  wrangler.toml      Cloudflare deployment config
-  src/index.js       Worker + Durable Object signaling (same protocol)
-  README.md          Cloudflare deploy guide
+  src/index.js         Worker + Durable Object signaling (same protocol)
+  README.md            Cloudflare deploy guide
 test/
-  signaling.test.js  end-to-end signaling test (runs against either backend)
+  signaling.test.js    end-to-end signaling test (runs against either backend)
 ```
 
 ## Privacy
@@ -86,7 +86,8 @@ Two options, both free:
 
 1. **Cloudflare (recommended):** Workers + Durable Objects, zero servers to
    manage, free plan included. Full guide: [`cloudflare/README.md`](cloudflare/README.md).
-   One command: `cd cloudflare && npm install && npx wrangler deploy`.
+   One command: `npm install && npm run cf:deploy` (config is `wrangler.toml`
+   at the repo root).
 2. **Any Node.js host** (Render, Railway, Fly.io, a VPS…): the repo runs as-is
    with `npm start`.
 
