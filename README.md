@@ -52,18 +52,26 @@ Then open <http://localhost:3000> in two browsers (or two tabs):
 | Layer | Technology |
 |---|---|
 | Media (audio/video) | WebRTC — direct device-to-device, encrypted (DTLS-SRTP) |
-| Signaling (finding each other) | Socket.IO — exchanges room codes, offers/answers, ICE candidates |
-| Serving the UI | Node.js + Express |
+| Signaling (finding each other) | Tiny JSON protocol over WebSocket — room codes, offers/answers, ICE candidates |
+| Backend option A | Node.js + Express + `ws` (`server.js`) |
+| Backend option B | Cloudflare Workers + Durable Objects (`cloudflare/`) — same protocol |
+| Serving the UI | Express static (Node) or Workers static assets (Cloudflare) |
 | NAT traversal | Public STUN server (Google) |
 
 ## Project layout
 
 ```
-server.js          signaling server (rooms + relay)
+server.js            signaling server (Node.js — rooms + relay)
 public/
-  index.html       UI: home, room, call screens + emergency/satellite facts
-  style.css        dark, phone-first styling
-  app.js           WebRTC call flow, ringtones, UI state machine
+  index.html         UI: home, room, call screens + emergency/satellite facts
+  style.css          dark, phone-first styling
+  app.js             WebRTC call flow, ringtones, UI state machine
+cloudflare/
+  wrangler.toml      Cloudflare deployment config
+  src/index.js       Worker + Durable Object signaling (same protocol)
+  README.md          Cloudflare deploy guide
+test/
+  signaling.test.js  end-to-end signaling test (runs against either backend)
 ```
 
 ## Privacy
@@ -74,7 +82,20 @@ the audio or video itself. Nothing is recorded.
 
 ## Deploying beyond your own machine
 
-To let friends call each other over the internet, deploy this to any Node.js
-host (Render, Railway, Fly.io, a VPS…). For reliable calls between arbitrary
-networks, add a free TURN server (e.g. Cloudflare TURN) to `PC_CONFIG` in
-`public/app.js`.
+Two options, both free:
+
+1. **Cloudflare (recommended):** Workers + Durable Objects, zero servers to
+   manage, free plan included. Full guide: [`cloudflare/README.md`](cloudflare/README.md).
+   One command: `cd cloudflare && npm install && npx wrangler deploy`.
+2. **Any Node.js host** (Render, Railway, Fly.io, a VPS…): the repo runs as-is
+   with `npm start`.
+
+For reliable calls between arbitrary networks, add a free TURN server
+(e.g. Cloudflare Calls TURN) to `PC_CONFIG` in `public/app.js`.
+
+## Tests
+
+```bash
+npm test                                    # spawns the Node server, runs the suite
+BASE_URL=http://localhost:8787 npm test     # runs the same suite against a backend
+```

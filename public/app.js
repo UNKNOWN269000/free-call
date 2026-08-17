@@ -1,15 +1,157 @@
 /* ==========================================================================
  * FreeCall — client
  *
- * Signaling (room codes, offers/answers, ICE candidates) travels through the
- * small Socket.IO server. The actual audio/video goes peer-to-peer via
- * WebRTC, straight between the two devices — that's what makes it free.
+ * Signaling (room codes, offers/answers, ICE candidates) travels over a
+ * plain WebSocket to a tiny server — Node.js or Cloudflare Workers. The
+ * actual audio/video goes peer-to-peer via WebRTC, straight between the two
+ * devices — that's what makes it free.
  * ========================================================================== */
 
 (() => {
   'use strict';
 
-  const socket = io();
+  // ------------------------------------------------------------------ Signaling
+  // Small WebSocket client for the FreeCall JSON protocol:
+  //   client -> server:  { type: 'relay', event, payload } | { type: 'leave' }
+  //   server -> client:  { type: 'joined', code, peers } | { type: 'error', message }
+  //                      | { type: 'event', event, from, payload }
+  class SignalingClient {
+    constructor() {
+      this.ws = null;
+      this.handlers = new Map();
+      this.code = null;
+      this.name = '';
+      this.intentional = false;
+      this.reconnectAttempts = 0;
+      this.reconnectTimer = null;
+    }
+
+    on(event, fn) {
+      if (!this.handlers.has(event)) this.handlers.set(event, []);
+      this.handlers.get(event).push(fn);
+    }
+
+    _dispatch(event, data) {
+      (this.handlers.get(event) || []).forEach((fn) => {
+        try { fn(data); } catch (err) { console.error(err); }
+      });
+    }
+
+    get connected() {
+      return this.ws && this.ws.readyState === WebSocket.OPEN;
+    }
+
+    async createRoom(name) {
+      const res = await fetch('/api/rooms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name || 'Guest' }),
+      });
+      let data = {};
+      try { data = await res.json(); } catch {}
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || 'Could not create a room. Try again.');
+      }
+      return data.code;
+    }
+
+    _url(code, name) {
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+      return `${proto}://${location.host}/room?code=${encodeURIComponent(code)}&name=${encodeURIComponent(name)}`;
+    }
+
+    connect(code, name) {
+      this.intentional = false;
+      this.code = code;
+      this.name = name;
+      return new Promise((resolve, reject) => {
+        const ws = new WebSocket(this._url(code, name));
+        this.ws = ws;
+        let settled = false;
+
+        ws.onmessage = (e) => {
+          let msg;
+          try { msg = JSON.parse(e.data); } catch { return; }
+
+          if (msg.type === 'joined') {
+            if (!settled) {
+              settled = true;
+              this.reconnectAttempts = 0;
+              resolve({ code: msg.code, peers: msg.peers || [] });
+            }
+            return;
+          }
+          if (msg.type === 'error') {
+            if (!settled) {
+              settled = true;
+              reject(new Error(msg.message || 'Could not join.'));
+            } else {
+              this._dispatch('error', { message: msg.message });
+            }
+            return;
+          }
+          if (msg.type === 'event') {
+            this._dispatch(msg.event, Object.assign({}, msg.payload || {}, { from: msg.from }));
+          }
+        };
+
+        ws.onclose = () => {
+          if (this.intentional) return;
+          if (!settled) {
+            settled = true;
+            reject(new Error('Connection closed. Check your internet and try again.'));
+            return;
+          }
+          this._scheduleReconnect();
+        };
+
+        ws.onerror = () => {
+          if (!settled) {
+            settled = true;
+            reject(new Error('Could not reach the server. Check your internet connection.'));
+          }
+        };
+      });
+    }
+
+    _scheduleReconnect() {
+      if (this.intentional || !this.code) return;
+      const MAX_ATTEMPTS = 5;
+      if (this.reconnectAttempts === 0) this._dispatch('disconnected', {});
+      if (this.reconnectAttempts >= MAX_ATTEMPTS) {
+        this._dispatch('reconnect-failed', {});
+        this.reconnectAttempts = 0;
+        return;
+      }
+      this.reconnectAttempts += 1;
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = setTimeout(() => {
+        this.connect(this.code, this.name)
+          .then(() => this._dispatch('reconnected', {}))
+          .catch(() => this._scheduleReconnect());
+      }, 1200 * this.reconnectAttempts);
+    }
+
+    send(event, payload) {
+      if (this.connected) {
+        this.ws.send(JSON.stringify({ type: 'relay', event, payload: payload || {} }));
+      }
+    }
+
+    disconnect() {
+      this.intentional = true;
+      this.reconnectAttempts = 0;
+      clearTimeout(this.reconnectTimer);
+      if (this.ws) {
+        this.ws.onclose = null;
+        try { this.ws.close(1000); } catch {}
+        this.ws = null;
+      }
+      this.code = null;
+    }
+  }
+
+  const signaling = new SignalingClient();
 
   // ------------------------------------------------------------------ DOM
   const $ = (id) => document.getElementById(id);
@@ -117,7 +259,7 @@
       els.peers.appendChild(chip);
     }
 
-    const canCall = Boolean(state.peer) && (state.status === 'waiting');
+    const canCall = Boolean(state.peer) && state.status === 'waiting' && signaling.connected;
     els.callBtn.classList.toggle('hidden', !canCall);
   }
 
@@ -144,7 +286,6 @@
       els.cancelBtn.classList.toggle('hidden', !ringingOut);
     }
 
-    // control button states
     const audioTrack = state.local && state.local.getAudioTracks()[0];
     const videoTrack = state.local && state.local.getVideoTracks()[0];
     els.muteBtn.classList.toggle('off', !!(audioTrack && !audioTrack.enabled));
@@ -243,12 +384,13 @@
     state.pc = pc;
 
     pc.onicecandidate = (e) => {
-      if (e.candidate) socket.emit('ice', { candidate: e.candidate });
+      if (e.candidate) signaling.send('ice', { candidate: e.candidate });
     };
 
     pc.ontrack = (e) => {
       els.remoteVideo.srcObject = e.streams[0];
       els.remoteVideo.play().catch(() => {});
+      updateCallUI();
     };
 
     pc.onconnectionstatechange = () => {
@@ -304,6 +446,10 @@
   // ------------------------------------------------------------------ call flow
   async function startCall() {
     if (!state.peer || state.status !== 'waiting') return;
+    if (!signaling.connected) {
+      toast('Still reconnecting to the server…', 'error');
+      return;
+    }
     try {
       await getLocalMedia();
       createPeerConnection();
@@ -314,7 +460,7 @@
       updateCallUI();
       show(screens.call);
       startRingtone('out');
-      socket.emit('call', { name: state.name, sdp: offer });
+      signaling.send('call', { name: state.name, sdp: offer });
     } catch (err) {
       handleMediaError(err);
     }
@@ -333,14 +479,14 @@
       stopRingtone();
       updateRoomUI();
       updateCallUI();
-      socket.emit('accept', { sdp: answer });
+      signaling.send('accept', { sdp: answer });
     } catch (err) {
       handleMediaError(err);
     }
   }
 
   function declineCall() {
-    socket.emit('decline', {});
+    signaling.send('decline', {});
     stopRingtone();
     state.status = 'waiting';
     teardownCall({ silent: true });
@@ -350,7 +496,7 @@
   }
 
   function cancelCall() {
-    socket.emit('cancel', {});
+    signaling.send('cancel', {});
     stopRingtone();
     state.status = 'waiting';
     teardownCall({ silent: true });
@@ -362,7 +508,7 @@
   function hangup() {
     if (state.status === 'ringing-out') { cancelCall(); return; }
     if (state.status === 'ringing-in') { declineCall(); return; }
-    socket.emit('end-call', {});
+    signaling.send('end-call', {});
     state.status = 'waiting';
     teardownCall({ silent: true });
     updateRoomUI();
@@ -419,9 +565,9 @@
   }
 
   // ------------------------------------------------------------------ signaling (incoming)
-  socket.on('call', (msg) => {
+  signaling.on('call', (msg) => {
     if (state.status === 'ringing-in' || state.status === 'in-call' || state.status === 'ringing-out') {
-      socket.emit('decline', {});
+      signaling.send('decline', {});
       return;
     }
     state.peer = { id: msg.from, name: msg.name || 'Friend' };
@@ -433,7 +579,7 @@
     startRingtone('in');
   });
 
-  socket.on('accept', async (msg) => {
+  signaling.on('accept', async (msg) => {
     if (!state.pc || state.status !== 'ringing-out') return;
     try {
       await state.pc.setRemoteDescription(msg.sdp);
@@ -447,7 +593,7 @@
     }
   });
 
-  socket.on('decline', () => {
+  signaling.on('decline', () => {
     if (state.status !== 'ringing-out') return;
     toast('Call declined', 'error');
     state.status = 'waiting';
@@ -457,7 +603,7 @@
     show(screens.room);
   });
 
-  socket.on('cancel', () => {
+  signaling.on('cancel', () => {
     if (state.status !== 'ringing-in') return;
     toast('Call cancelled', '');
     state.status = 'waiting';
@@ -467,7 +613,7 @@
     show(screens.room);
   });
 
-  socket.on('end-call', () => {
+  signaling.on('end-call', () => {
     if (state.status === 'in-call' || state.status === 'ringing-in') {
       toast('Call ended', '');
       state.status = 'waiting';
@@ -478,7 +624,7 @@
     }
   });
 
-  socket.on('ice', async (msg) => {
+  signaling.on('ice', async (msg) => {
     const pc = state.pc;
     if (!pc) return;
     if (!pc.remoteDescription) {
@@ -488,7 +634,7 @@
     try { await pc.addIceCandidate(msg.candidate); } catch {}
   });
 
-  socket.on('room-update', ({ peers }) => {
+  signaling.on('room-update', ({ peers }) => {
     const previousPeerId = state.peer && state.peer.id;
     state.peer = peers[0] || null;
 
@@ -511,23 +657,56 @@
     updateRoomUI();
   });
 
+  signaling.on('disconnected', () => {
+    if (!state.code) return;
+    toast('Connection lost — trying to reconnect…', 'error');
+    if (state.status !== 'waiting') {
+      teardownCall({ silent: true });
+      state.status = 'waiting';
+      updateCallUI();
+    }
+    updateRoomUI();
+  });
+
+  signaling.on('reconnect-failed', () => {
+    if (!state.code) return;
+    toast('Could not reconnect. You are back home.', 'error');
+    state.code = null;
+    state.peer = null;
+    state.status = 'idle';
+    els.topLeave.classList.add('hidden');
+    updateRoomUI();
+    show(screens.home);
+  });
+
   // ------------------------------------------------------------------ room actions
-  function createRoom() {
+  async function createRoom() {
     const name = els.nameInput.value.trim();
-    socket.emit('create-room', { name }, (res) => {
-      if (!res || !res.ok) { toast('Could not create a room. Try again.', 'error'); return; }
-      enterRoom(res.code, name);
-    });
+    try {
+      const code = await signaling.createRoom(name);
+      await signaling.connect(code, name);
+      enterRoom(code, name);
+    } catch (err) {
+      toast(err.message || 'Could not create a room. Try again.', 'error');
+    }
   }
 
-  function joinRoom() {
+  async function joinRoom() {
     const name = els.nameInput.value.trim();
     const code = els.codeInput.value.trim().toUpperCase();
     if (!code) { toast('Enter the room code your friend shared.', 'error'); return; }
-    socket.emit('join-room', { code, name }, (res) => {
-      if (!res || !res.ok) { toast(res ? res.error : 'Could not join.', 'error'); return; }
-      enterRoom(res.code, name, res.peers[0] || null);
-    });
+    try {
+      const joined = await signaling.connect(code, name);
+      enterRoom(joined.code, name, joined.peers[0] || null);
+      toast(
+        joined.peers[0]
+          ? `Joined ${joined.peers[0].name}’s room!`
+          : `Room ${joined.code} joined — share the code with a friend!`,
+        'ok'
+      );
+    } catch (err) {
+      toast(err.message || 'Could not join the room.', 'error');
+    }
   }
 
   function enterRoom(code, name, peer = null) {
@@ -538,11 +717,10 @@
     els.topLeave.classList.remove('hidden');
     updateRoomUI();
     show(screens.room);
-    if (!peer) toast(`Room ${code} created. Share the code with a friend!`, 'ok');
   }
 
   function leaveRoom() {
-    socket.emit('leave-room');
+    signaling.disconnect();
     teardownCall({ silent: true });
     state.code = null;
     state.peer = null;
@@ -585,6 +763,7 @@
 
   window.addEventListener('beforeunload', () => {
     stopRingtone();
+    signaling.disconnect();
     if (state.local) state.local.getTracks().forEach((t) => t.stop());
   });
 
