@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0b1020" />
+  <title>FreeCall — Free voice &amp; video calls</title>
+  <meta name="description" content="FreeCall lets you call anyone for free, peer-to-peer over Wi-Fi or mobile data. No SIM, no minutes, no subscription." />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%93%9E%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-icon">📞</span>
+      <span class="brand-name">FreeCall</span>
+      <span class="brand-badge">100% free</span>
+    </div>
+    <button id="top-leave" class="ghost hidden">Leave room</button>
+  </header>
+
+  <!-- ============ HOME ============ -->
+  <main id="home-screen" class="screen">
+    <section class="hero">
+      <h1>Call anyone. <span class="grad">Pay nothing.</span></h1>
+      <p>
+        FreeCall connects you straight to the other person — peer-to-peer over
+        Wi-Fi or mobile data. No phone network, no carrier minutes, no SIM, no
+        subscription.
+      </p>
+    </section>
+
+    <section class="panel">
+      <label class="field">
+        <span>Your name</span>
+        <input id="name-input" type="text" maxlength="24" placeholder="e.g. Alex" autocomplete="name" />
+      </label>
+
+      <button id="create-btn" class="btn primary big">
+        <span class="btn-icon">➕</span> Create a room
+      </button>
+
+      <div class="divider"><span>or join a friend</span></div>
+
+      <div class="join-row">
+        <input id="code-input" type="text" maxlength="6" placeholder="CODE" class="code-input" spellcheck="false" />
+        <button id="join-btn" class="btn big">Join</button>
+      </div>
+    </section>
+
+    <section class="info-cards">
+      <details class="info-card" open>
+        <summary><span class="ic">💸</span> How is it free?</summary>
+        <p>
+          FreeCall sends your voice and video directly from your device to the
+          other person's device over the internet (Wi-Fi or mobile data) — the
+          same trick WhatsApp, Signal, and FaceTime use. Your call never touches
+          a phone company's network, so there are no minutes, no bills, and no
+          cost — ever.
+        </p>
+      </details>
+
+      <details class="info-card">
+        <summary><span class="ic">🚨</span> In a real emergency</summary>
+        <p>
+          Dial your country's emergency number — <strong>911</strong> (US),
+          <strong>112</strong> (EU &amp; many countries), or <strong>999</strong>
+          (UK). By law, mobile networks must accept emergency calls from
+          <em>any</em> phone — even with no SIM card, no plan, and zero credit.
+          Emergency calls are always free. FreeCall is not a replacement for
+          emergency services.
+        </p>
+      </details>
+
+      <details class="info-card">
+        <summary><span class="ic">🛰️</span> Satellite SOS — the facts</summary>
+        <p>
+          Some phones (iPhone 14 and newer, select Android devices) can send
+          emergency <strong>text messages</strong> via satellite when there is
+          no cellular signal at all. That feature is built into the phone's
+          operating system for emergencies only — apps cannot tap into it, and
+          it does not allow normal free voice calls. Satellite <em>voice</em>
+          calls (Iridium, Inmarsat, Globalstar) require licensed hardware and
+          paid airtime costing dollars per minute — no free satellite calling
+          network exists.
+        </p>
+      </details>
+    </section>
+  </main>
+
+  <!-- ============ ROOM ============ -->
+  <main id="room-screen" class="screen hidden">
+    <section class="panel room-panel">
+      <p class="room-eyebrow">YOUR ROOM CODE</p>
+      <h2 id="room-code" class="room-code">······</h2>
+      <p id="room-status" class="room-status">Joining room…</p>
+
+      <div class="room-actions">
+        <button id="copy-link-btn" class="btn">🔗 Copy invite link</button>
+        <button id="call-btn" class="btn primary hidden">📞 Call</button>
+      </div>
+
+      <div id="peers" class="peers"></div>
+    </section>
+
+    <section class="panel tip-panel">
+      <p class="tip-title">💡 How to call for free</p>
+      <ol class="tip-list">
+        <li>Send your code (or the invite link) to a friend.</li>
+        <li>They open FreeCall, enter the code, and join.</li>
+        <li>Tap <strong>Call</strong> — talk as long as you want. It's free.</li>
+      </ol>
+      <p class="tip-note">
+        Both devices need internet (Wi-Fi or mobile data). The connection goes
+        straight between the two of you — it is not recorded or routed through
+        any phone company.
+      </p>
+    </section>
+  </main>
+
+  <!-- ============ CALL ============ -->
+  <main id="call-screen" class="screen call-screen hidden">
+    <video id="remote-video" autoplay playsinline></video>
+    <video id="local-video" autoplay playsinline muted></video>
+
+    <div id="call-overlay" class="call-overlay hidden">
+      <div class="avatar" id="overlay-avatar">👤</div>
+      <div id="overlay-title" class="overlay-title">Calling…</div>
+      <div id="overlay-sub" class="overlay-sub"></div>
+      <div class="overlay-actions">
+        <button id="accept-btn" class="btn primary round hidden" title="Accept">✅</button>
+        <button id="decline-btn" class="btn danger round hidden" title="Decline">❌</button>
+        <button id="cancel-btn" class="btn danger round hidden" title="Cancel">❌</button>
+      </div>
+    </div>
+
+    <div id="controls" class="controls hidden">
+      <button id="mute-btn" class="ctl" title="Mute / unmute microphone">🎙️</button>
+      <button id="cam-btn" class="ctl" title="Turn camera on / off">📷</button>
+      <button id="share-btn" class="ctl" title="Share your screen">🖥️</button>
+      <button id="hangup-btn" class="ctl hangup" title="End call">📵</button>
+    </div>
+  </main>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
